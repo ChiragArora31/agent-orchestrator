@@ -37,12 +37,26 @@ import {
 } from "@aoagents/ao-core";
 
 // Static plugin imports — webpack needs these to be string literals
+import pluginRuntimeProcess from "@aoagents/ao-plugin-runtime-process";
 import pluginRuntimeTmux from "@aoagents/ao-plugin-runtime-tmux";
+import pluginAgentAider from "@aoagents/ao-plugin-agent-aider";
 import pluginAgentClaudeCode from "@aoagents/ao-plugin-agent-claude-code";
+import pluginAgentCodex from "@aoagents/ao-plugin-agent-codex";
 import pluginAgentOpencode from "@aoagents/ao-plugin-agent-opencode";
+import pluginWorkspaceClone from "@aoagents/ao-plugin-workspace-clone";
 import pluginWorkspaceWorktree from "@aoagents/ao-plugin-workspace-worktree";
 import pluginScmGithub from "@aoagents/ao-plugin-scm-github";
+import pluginScmGitlab from "@aoagents/ao-plugin-scm-gitlab";
+import pluginNotifierComposio from "@aoagents/ao-plugin-notifier-composio";
+import pluginNotifierDesktop from "@aoagents/ao-plugin-notifier-desktop";
+import pluginNotifierDiscord from "@aoagents/ao-plugin-notifier-discord";
+import pluginNotifierOpenclaw from "@aoagents/ao-plugin-notifier-openclaw";
+import pluginNotifierSlack from "@aoagents/ao-plugin-notifier-slack";
+import pluginNotifierWebhook from "@aoagents/ao-plugin-notifier-webhook";
+import pluginTerminalIterm2 from "@aoagents/ao-plugin-terminal-iterm2";
+import pluginTerminalWeb from "@aoagents/ao-plugin-terminal-web";
 import pluginTrackerGithub from "@aoagents/ao-plugin-tracker-github";
+import pluginTrackerGitlab from "@aoagents/ao-plugin-tracker-gitlab";
 import pluginTrackerLinear from "@aoagents/ao-plugin-tracker-linear";
 
 export interface Services {
@@ -57,6 +71,30 @@ const globalForServices = globalThis as typeof globalThis & {
   _aoServices?: Services;
   _aoServicesInit?: Promise<Services>;
 };
+
+const WEB_BUILTIN_PLUGIN_MODULES = {
+  "@aoagents/ao-plugin-runtime-tmux": pluginRuntimeTmux,
+  "@aoagents/ao-plugin-runtime-process": pluginRuntimeProcess,
+  "@aoagents/ao-plugin-agent-claude-code": pluginAgentClaudeCode,
+  "@aoagents/ao-plugin-agent-codex": pluginAgentCodex,
+  "@aoagents/ao-plugin-agent-aider": pluginAgentAider,
+  "@aoagents/ao-plugin-agent-opencode": pluginAgentOpencode,
+  "@aoagents/ao-plugin-workspace-worktree": pluginWorkspaceWorktree,
+  "@aoagents/ao-plugin-workspace-clone": pluginWorkspaceClone,
+  "@aoagents/ao-plugin-tracker-github": pluginTrackerGithub,
+  "@aoagents/ao-plugin-tracker-linear": pluginTrackerLinear,
+  "@aoagents/ao-plugin-tracker-gitlab": pluginTrackerGitlab,
+  "@aoagents/ao-plugin-scm-github": pluginScmGithub,
+  "@aoagents/ao-plugin-scm-gitlab": pluginScmGitlab,
+  "@aoagents/ao-plugin-notifier-composio": pluginNotifierComposio,
+  "@aoagents/ao-plugin-notifier-desktop": pluginNotifierDesktop,
+  "@aoagents/ao-plugin-notifier-discord": pluginNotifierDiscord,
+  "@aoagents/ao-plugin-notifier-openclaw": pluginNotifierOpenclaw,
+  "@aoagents/ao-plugin-notifier-slack": pluginNotifierSlack,
+  "@aoagents/ao-plugin-notifier-webhook": pluginNotifierWebhook,
+  "@aoagents/ao-plugin-terminal-iterm2": pluginTerminalIterm2,
+  "@aoagents/ao-plugin-terminal-web": pluginTerminalWeb,
+} as const;
 
 /** Get (or lazily initialize) the core services singleton. */
 export function getServices(): Promise<Services> {
@@ -78,14 +116,15 @@ async function initServices(): Promise<Services> {
   const config = loadConfig();
   const registry = createPluginRegistry();
 
-  // Register plugins explicitly (webpack can't handle dynamic import() in core)
-  registry.register(pluginRuntimeTmux);
-  registry.register(pluginAgentClaudeCode);
-  registry.register(pluginAgentOpencode);
-  registry.register(pluginWorkspaceWorktree);
-  registry.register(pluginScmGithub);
-  registry.register(pluginTrackerGithub);
-  registry.register(pluginTrackerLinear);
+  // Load builtins through core so web bootstrapping matches CLI/core registry behavior,
+  // while still using static imports that Next.js can bundle.
+  await registry.loadBuiltins(config, async (pkg) => {
+    const mod = WEB_BUILTIN_PLUGIN_MODULES[pkg as keyof typeof WEB_BUILTIN_PLUGIN_MODULES];
+    if (!mod) {
+      throw new Error(`Built-in plugin "${pkg}" is not bundled by the web services bootstrap`);
+    }
+    return mod;
+  });
 
   const sessionManager = createSessionManager({ config, registry });
 
