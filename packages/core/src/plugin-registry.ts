@@ -447,7 +447,10 @@ export function createPluginRegistry(): PluginRegistry {
         let mod;
         try {
           mod = normalizeImportedPluginModule(await doImport(builtin.pkg));
-        } catch {
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("is not bundled")) {
+            process.stderr.write(`[plugin-registry] ${error.message}\n`);
+          }
           // Plugin not installed — that's fine, only load what's available
           continue;
         }
