@@ -6,6 +6,8 @@ import {
   loadConfig,
   SessionNotRestorableError,
   WorkspaceMissingError,
+  TERMINAL_STATUSES,
+  type SessionStatus,
 } from "@aoagents/ao-core";
 import { DEFAULT_PORT } from "../lib/constants.js";
 import { git, getTmuxActivity, tmux } from "../lib/shell.js";
@@ -33,11 +35,21 @@ export function registerSession(program: Command): void {
 
   session
     .command("ls")
-    .description("List all sessions")
+    .description("List sessions (non-terminal rows by default; see --include-terminated)")
     .option("-p, --project <id>", "Filter by project ID")
     .option("-a, --all", "Include orchestrator sessions")
     .option("--json", "Output as JSON")
-    .action(async (opts: { project?: string; all?: boolean; json?: boolean }) => {
+    .option(
+      "--include-terminated",
+      "Include sessions in a terminal state (done, merged, killed, cleanup, …)",
+    )
+    .action(
+      async (opts: {
+        project?: string;
+        all?: boolean;
+        json?: boolean;
+        includeTerminated?: boolean;
+      }) => {
       const config = loadConfig();
       if (opts.project && !config.projects[opts.project]) {
         console.error(chalk.red(`Unknown project: ${opts.project}`));
@@ -68,6 +80,9 @@ export function registerSession(program: Command): void {
         ([id, project]) => project.sessionPrefix ?? id,
       );
       const jsonOutput: SessionListEntry[] = [];
+      const includeTerminated = opts.includeTerminated === true;
+      const isTerminalStatus = (status: string | null | undefined): boolean =>
+        typeof status === "string" && TERMINAL_STATUSES.has(status as SessionStatus);
 
       for (const projectId of projectIds) {
         const project = config.projects[projectId];
@@ -76,13 +91,32 @@ export function registerSession(program: Command): void {
           console.log(chalk.bold(`\n${project.name || projectId}:`));
         }
 
-        const projectSessions = (byProject.get(projectId) ?? []).sort((a, b) =>
+        const projectSessionsRaw = (byProject.get(projectId) ?? []).sort((a, b) =>
           a.id.localeCompare(b.id),
         );
 
-        if (projectSessions.length === 0) {
+        if (projectSessionsRaw.length === 0) {
           if (!opts.json) {
             console.log(chalk.dim("  (no active sessions)"));
+          }
+          continue;
+        }
+
+        const hiddenTerminated = includeTerminated
+          ? 0
+          : projectSessionsRaw.filter((s) => isTerminalStatus(s.status)).length;
+
+        const projectSessions = includeTerminated
+          ? projectSessionsRaw
+          : projectSessionsRaw.filter((s) => !isTerminalStatus(s.status));
+
+        if (projectSessions.length === 0) {
+          if (!opts.json && hiddenTerminated > 0) {
+            console.log(
+              chalk.dim(
+                `  (${hiddenTerminated} completed session${hiddenTerminated !== 1 ? "s" : ""} hidden — use --include-terminated to list them)`,
+              ),
+            );
           }
           continue;
         }
