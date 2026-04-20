@@ -3,7 +3,16 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMediaQuery, MOBILE_BREAKPOINT } from "@/hooks/useMediaQuery";
-import { type DashboardSession, TERMINAL_STATUSES, NON_RESTORABLE_STATUSES } from "@/lib/types";
+import {
+  type DashboardSession,
+  type DashboardPR,
+  TERMINAL_STATUSES,
+  TERMINAL_ACTIVITIES,
+  NON_RESTORABLE_STATUSES,
+  isPRMergeReady,
+} from "@/lib/types";
+import { CI_STATUS } from "@aoagents/ao-core/types";
+import { cn } from "@/lib/cn";
 import dynamic from "next/dynamic";
 import { getSessionTitle } from "@/lib/format";
 import type { ProjectInfo } from "@/lib/project-name";
@@ -63,7 +72,8 @@ export function SessionDetail({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
   const pr = session.pr;
-  const terminalEnded = TERMINAL_STATUSES.has(session.status);
+  const terminalEnded =
+    TERMINAL_STATUSES.has(session.status) || TERMINAL_ACTIVITIES.has(session.activity);
   const isRestorable = terminalEnded && !NON_RESTORABLE_STATUSES.has(session.status);
   const activity = (session.activity && sessionActivityMeta[session.activity]) ?? {
     label: session.activity ?? "unknown",

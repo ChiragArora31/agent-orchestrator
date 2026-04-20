@@ -225,6 +225,24 @@ describe("SessionDetail desktop layout", () => {
     expect(screen.queryByTestId("direct-terminal")).not.toBeInTheDocument();
   });
 
+  it("shows restore action when activity is exited but status is still working", () => {
+    render(
+      <SessionDetail
+        session={makeSession({
+          id: "worker-crashed",
+          projectId: "my-app",
+          status: "working",
+          activity: "exited",
+          pr: null,
+        })}
+      />,
+    );
+
+    expect(screen.getByText(/Terminal session has ended/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(screen.queryByTestId("direct-terminal")).not.toBeInTheDocument();
+  });
+
   it("shows restore for restorable orchestrator sessions", () => {
     render(
       <SessionDetail
