@@ -73,7 +73,8 @@ export function SessionDetail({
   const [showTerminal, setShowTerminal] = useState(false);
   const pr = session.pr;
   const terminalEnded =
-    TERMINAL_STATUSES.has(session.status) || TERMINAL_ACTIVITIES.has(session.activity);
+    TERMINAL_STATUSES.has(session.status) ||
+    (session.activity !== null && TERMINAL_ACTIVITIES.has(session.activity));
   const isRestorable = terminalEnded && !NON_RESTORABLE_STATUSES.has(session.status);
   const activity = (session.activity && sessionActivityMeta[session.activity]) ?? {
     label: session.activity ?? "unknown",
