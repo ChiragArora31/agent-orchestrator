@@ -2301,17 +2301,13 @@ export function createSessionManager(deps: SessionManagerDeps): OpenCodeSessionM
           continue;
         }
 
-        let cleanedTerminatedWorkspace = false;
-        if (options?.dryRun) {
-          cleanedTerminatedWorkspace = hasReapableManagedWorkspace(
-            project,
-            projectKey,
-            terminatedRaw["worktree"],
-          );
-        } else {
-          const killResult = await kill(terminatedId, { purgeOpenCode: false });
-          cleanedTerminatedWorkspace = killResult.cleaned;
-        }
+        const cleanedTerminatedWorkspace = options?.dryRun
+          ? hasReapableManagedWorkspace(
+              project,
+              projectKey,
+              terminatedRaw["worktree"],
+            )
+          : (await kill(terminatedId, { purgeOpenCode: false })).cleaned;
 
         const cleanupAgent = resolveSelectionForSession(project, terminatedId, terminatedRaw).agentName;
         const mappedOpenCodeSessionId = asValidOpenCodeSessionId(terminatedRaw["opencodeSessionId"]);
