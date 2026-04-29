@@ -32,6 +32,13 @@ import {
 } from "./global-config.js";
 import { loadEffectiveProjectConfig } from "./project-resolver.js";
 
+const STORAGE_KEY_COMPONENT_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function sanitizeStorageKeyComponent(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return STORAGE_KEY_COMPONENT_PATTERN.test(sanitized) ? sanitized : "project";
+}
+
 function inferScmPlugin(project: {
   repo?: string;
   scm?: Record<string, unknown>;
@@ -76,7 +83,8 @@ function generateLegacyWrappedStorageKey(configPath: string, projectPath: string
   const resolvedConfigPath = realpathSync(configPath);
   const configDir = dirname(resolvedConfigPath);
   const hash = createHash("sha256").update(configDir).digest("hex").slice(0, 12);
-  return `${hash}-${basename(projectPath)}`;
+  const projectBasename = basename(resolve(configDir, projectPath));
+  return `${hash}-${sanitizeStorageKeyComponent(projectBasename)}`;
 }
 
 function applyWrappedLocalStorageKeys(configPath: string, parsed: unknown): unknown {
