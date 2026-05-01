@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadConfig, findConfigFile, validateConfig } from "../src/config.js";
+import {
+  loadConfig,
+  findConfigFile,
+  validateConfig,
+  generateLegacyWrappedStorageKey,
+} from "../src/config.js";
 import { ConfigNotFoundError } from "../src/types.js";
 
 describe("Config Loading", () => {
@@ -228,6 +233,32 @@ projects:
       const config = loadConfig(globalConfigPath);
       expect(Object.values(config.projects)).toEqual([]);
       expect(Object.values(config.degradedProjects)).toHaveLength(1);
+    });
+
+    it("sanitizes wrapped dot-path handling for storage key and derived sessionPrefix", () => {
+      const configPath = join(testDir, "dot-path-config.yaml");
+      writeFileSync(
+        configPath,
+        [
+          "projects:",
+          "  dot-project:",
+          "    path: .",
+          "",
+        ].join("\n"),
+      );
+
+      const config = loadConfig(configPath);
+      const project = config.projects["dot-project"];
+      const storageKey = generateLegacyWrappedStorageKey(configPath, ".");
+
+      expect(project).toBeDefined();
+      if (!project) {
+        throw new Error("dot-project missing from loaded config");
+      }
+      expect(storageKey).toMatch(/^[a-z0-9]{12}-[a-zA-Z0-9_-]+$/);
+      expect(storageKey).not.toContain(".");
+      expect(project.sessionPrefix).toMatch(/^[a-zA-Z0-9_-]+$/);
+      expect(project.sessionPrefix).not.toBe(".");
     });
   });
 

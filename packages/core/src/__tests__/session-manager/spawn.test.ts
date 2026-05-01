@@ -355,31 +355,6 @@ describe("spawn", () => {
     expect(session.branch).toBe("session/app-23");
   });
 
-  it("uses a valid runtime session name when the project path is the config directory", async () => {
-    const project = config.projects["my-app"]!;
-    const dotPathConfig = validateConfig({
-      ...config,
-      projects: {
-        "my-app": {
-          ...project,
-          path: tmpDir,
-        },
-      },
-    });
-
-    const sm = createSessionManager({ config: dotPathConfig, registry: mockRegistry });
-    await sm.spawn({ projectId: "my-app" });
-
-    expect(mockRuntime.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: "app-1",
-        environment: expect.objectContaining({
-          AO_TMUX_NAME: "app-1",
-        }),
-      }),
-    );
-  });
-
   it("writes metadata file", async () => {
     const sm = createSessionManager({ config, registry: mockRegistry });
     await sm.spawn({ projectId: "my-app", issueId: "INT-42" });

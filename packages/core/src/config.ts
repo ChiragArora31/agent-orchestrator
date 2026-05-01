@@ -79,7 +79,7 @@ function classifyConfigShape(configPath: string): "wrapped" | "flat-or-nonobject
     : "flat-or-nonobject";
 }
 
-function generateLegacyWrappedStorageKey(configPath: string, projectPath: string): string {
+export function generateLegacyWrappedStorageKey(configPath: string, projectPath: string): string {
   const resolvedConfigPath = realpathSync(configPath);
   const configDir = dirname(resolvedConfigPath);
   const hash = createHash("sha256").update(configDir).digest("hex").slice(0, 12);
@@ -592,7 +592,8 @@ function applyProjectDefaults(config: OrchestratorConfig): OrchestratorConfig {
     // This preserves the long-standing semantics on this branch, where
     // `/repos/integrator` becomes `int` regardless of the config key.
     if (!project.sessionPrefix) {
-      project.sessionPrefix = generateSessionPrefix(basename(project.path));
+      const safePathComponent = sanitizeStorageKeyComponent(basename(project.path));
+      project.sessionPrefix = generateSessionPrefix(safePathComponent);
     }
 
     const inferredPlugin = inferScmPlugin(project);
