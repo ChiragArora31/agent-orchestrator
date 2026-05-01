@@ -58,7 +58,10 @@ import {
   findFreePort,
   MAX_PORT_SCAN,
 } from "../lib/web-dir.js";
-import { rebuildDashboardProductionArtifacts } from "../lib/dashboard-rebuild.js";
+import {
+  clearStaleCacheIfNeeded,
+  rebuildDashboardProductionArtifacts,
+} from "../lib/dashboard-rebuild.js";
 import { preflight } from "../lib/preflight.js";
 import {
   register,
@@ -504,6 +507,12 @@ const AGENT_INSTALL_OPTIONS: AgentInstallOption[] = [
     label: "OpenCode",
     cmd: "npm",
     args: ["install", "-g", "opencode-ai"],
+  },
+  {
+    id: "kimicode",
+    label: "Kimi Code",
+    cmd: "uv",
+    args: ["tool", "install", "kimi-cli"],
   },
 ];
 
@@ -1258,6 +1267,7 @@ async function runStartup(
       await rebuildDashboardProductionArtifacts(webDir);
     } else if (!willUseDevServer) {
       await preflight.checkBuilt(webDir);
+      await clearStaleCacheIfNeeded(webDir);
     }
 
     spinner.start("Starting dashboard");

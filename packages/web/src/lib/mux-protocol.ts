@@ -18,6 +18,7 @@ export type ServerMessage =
   | { ch: "terminal"; id: string; type: "opened"; projectId?: string }
   | { ch: "terminal"; id: string; type: "error"; message: string; projectId?: string }
   | { ch: "sessions"; type: "snapshot"; sessions: SessionPatch[] }
+  | { ch: "sessions"; type: "error"; error: string }
   | { ch: "system"; type: "pong" }
   | { ch: "system"; type: "error"; message: string };
 

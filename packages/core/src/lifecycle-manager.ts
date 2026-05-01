@@ -92,6 +92,19 @@ function parseDuration(str: string): number {
   }
 }
 
+/** Reaction keys for conditions that can oscillate (e.g. CI failing→pending→failing).
+ *  Their trackers survive status exit so the escalation budget accumulates
+ *  across oscillations instead of resetting to zero each time.
+ *  Note: "merge-conflicts" is NOT here — statusToEventType never emits
+ *  "merge.conflicts", so the transition handler at line ~1892 can't reach it.
+ *  Merge-conflict tracker lifecycle is managed in maybeDispatchMergeConflicts. */
+const PERSISTENT_REACTION_KEYS = new Set(["ci-failed"]);
+
+/** Number of consecutive CI-passing polls required before the ci-failed tracker
+ *  (including its escalated flag) is cleared, allowing a fresh budget for the
+ *  next real CI failure incident. */
+const CI_PASSING_STABLE_THRESHOLD = 2;
+
 type WorkspaceBranchProbe =
   | { kind: "branch"; branch: string }
   | { kind: "detached" }
@@ -260,6 +273,71 @@ function prStateToEventType(
   }
 }
 
+/** PR context for event enrichment. */
+interface EventPRContext {
+  url: string;
+  /** Actual PR title from enrichment cache. null until cache is populated. */
+  title: string | null;
+  number: number;
+  branch: string;
+}
+
+/** Event context with PR and issue information for webhook payloads. */
+interface EventContext {
+  pr: EventPRContext | null;
+  issueId: string | null;
+  issueTitle: string | null;
+  /** Agent task summary (NOT the PR title). May describe the work before a PR exists. */
+  summary: string | null;
+  branch: string | null;
+}
+
+/**
+ * Minimal session context required for reaction execution and event enrichment.
+ * Used for system-level events (like all-complete) that don't have a real session.
+ */
+interface ReactionSessionContext {
+  id: SessionId;
+  projectId: string;
+  pr: Session["pr"];
+  issueId: string | null;
+  branch: string | null;
+  metadata: Record<string, string>;
+  agentInfo: Session["agentInfo"];
+}
+
+/**
+ * Build event context with PR and issue information for webhook payloads.
+ * This enriches events with useful metadata so external consumers (Telegram, Discord, etc.)
+ * can display meaningful information without making additional API calls.
+ */
+function buildEventContext(
+  session: Session | ReactionSessionContext,
+  prEnrichmentCache: Map<string, PREnrichmentData>,
+): EventContext {
+  let pr: EventPRContext | null = null;
+
+  if (session.pr) {
+    const prKey = `${session.pr.owner}/${session.pr.repo}#${session.pr.number}`;
+    const cached = prEnrichmentCache.get(prKey);
+
+    pr = {
+      url: session.pr.url,
+      title: cached?.title ?? null,
+      number: session.pr.number,
+      branch: session.pr.branch,
+    };
+  }
+
+  return {
+    pr,
+    issueId: session.issueId,
+    issueTitle: session.metadata["issueTitle"] ?? null,
+    summary: session.agentInfo?.summary ?? null,
+    branch: session.branch,
+  };
+}
+
 /** Map event type to reaction config key. */
 function eventToReactionKey(eventType: EventType): string | null {
   switch (eventType) {
@@ -385,6 +463,9 @@ export interface LifecycleManagerDeps {
 interface ReactionTracker {
   attempts: number;
   firstTriggered: Date;
+  /** True after this reaction has escalated. Short-circuits further dispatches
+   *  until the underlying condition resolves and the tracker is explicitly cleared. */
+  escalated?: boolean;
 }
 
 /** Create a LifecycleManager instance. */
@@ -1156,17 +1237,22 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
 
   /** Execute a reaction for a session. */
   async function executeReaction(
-    sessionId: SessionId,
-    projectId: string,
+    session: Session | ReactionSessionContext,
     reactionKey: string,
     reactionConfig: ReactionConfig,
   ): Promise<ReactionResult> {
+    const { id: sessionId, projectId } = session;
     const trackerKey = `${sessionId}:${reactionKey}`;
     let tracker = reactionTrackers.get(trackerKey);
 
     if (!tracker) {
       tracker = { attempts: 0, firstTriggered: new Date() };
       reactionTrackers.set(trackerKey, tracker);
+    }
+
+    // Already escalated — wait for the condition to resolve before resuming.
+    if (tracker.escalated) {
+      return { reactionType: reactionKey, success: true, action: "escalated", escalated: true };
     }
 
     // Increment attempts before checking escalation
@@ -1194,13 +1280,19 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
 
     if (shouldEscalate) {
       // Escalate to human
+      const context = buildEventContext(session, prEnrichmentCache);
       const event = createEvent("reaction.escalated", {
         sessionId,
         projectId,
         message: `Reaction '${reactionKey}' escalated after ${tracker.attempts} attempts`,
-        data: { reactionKey, attempts: tracker.attempts },
+        data: { reactionKey, attempts: tracker.attempts, context, schemaVersion: 2 },
       });
       await notifyHuman(event, reactionConfig.priority ?? "urgent");
+
+      // Mark as escalated — silences further dispatches until the underlying
+      // condition resolves and clearReactionTracker() is called explicitly.
+      tracker.escalated = true;
+
       return {
         reactionType: reactionKey,
         success: true,
@@ -1239,11 +1331,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       }
 
       case "notify": {
+        const context = buildEventContext(session, prEnrichmentCache);
         const event = createEvent("reaction.triggered", {
           sessionId,
           projectId,
           message: `Reaction '${reactionKey}' triggered notification`,
-          data: { reactionKey },
+          data: { reactionKey, context, schemaVersion: 2 },
         });
         await notifyHuman(event, reactionConfig.priority ?? "info");
         return {
@@ -1257,11 +1350,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       case "auto-merge": {
         // Auto-merge is handled by the SCM plugin
         // For now, just notify
+        const context = buildEventContext(session, prEnrichmentCache);
         const event = createEvent("reaction.triggered", {
           sessionId,
           projectId,
           message: `Reaction '${reactionKey}' triggered auto-merge`,
-          data: { reactionKey },
+          data: { reactionKey, context, schemaVersion: 2 },
         });
         await notifyHuman(event, "action");
         return {
@@ -1472,12 +1566,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
             ...reactionConfig,
             message: formatReviewCommentsMessage(pendingComments, "reviewer", reviewSummaries),
           };
-          const result = await executeReaction(
-            session.id,
-            session.projectId,
-            humanReactionKey,
-            enrichedConfig,
-          );
+          const result = await executeReaction(session, humanReactionKey, enrichedConfig);
           if (result.success) {
             updateSessionMetadata(session, {
               lastPendingReviewDispatchHash: pendingFingerprint,
@@ -1515,16 +1604,13 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           reactionConfig.action &&
           (reactionConfig.auto !== false || reactionConfig.action === "notify")
         ) {
+          // Always enrich with formatted comment listing so the agent has inline
+          // data and doesn't need to re-fetch via gh api.
           const enrichedConfig = {
             ...reactionConfig,
             message: formatReviewCommentsMessage(automatedComments, "bot"),
           };
-          const result = await executeReaction(
-            session.id,
-            session.projectId,
-            automatedReactionKey,
-            enrichedConfig,
-          );
+          const result = await executeReaction(session, automatedReactionKey, enrichedConfig);
           if (result.success) {
             updateSessionMetadata(session, {
               lastAutomatedReviewDispatchHash: automatedFingerprint,
@@ -1589,6 +1675,138 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     }
     lines.push("", "Investigate the failures, fix the issues, and push again.");
     return lines.join("\n");
+  }
+
+  async function maybeDispatchCIFailureDetails(
+    session: Session,
+    _oldStatus: SessionStatus,
+    newStatus: SessionStatus,
+    transitionReaction?: { key: string; result: ReactionResult | null },
+  ): Promise<void> {
+    const project = config.projects[session.projectId];
+    if (!project || !session.pr) return;
+
+    const scm = project.scm?.plugin ? registry.get<SCM>("scm", project.scm.plugin) : null;
+    if (!scm) return;
+
+    const ciReactionKey = "ci-failed";
+
+    // Clear tracking when PR is closed/merged
+    if (newStatus === "merged" || newStatus === "killed") {
+      clearReactionTracker(session.id, ciReactionKey);
+      updateSessionMetadata(session, {
+        lastCIFailureFingerprint: "",
+        lastCIFailureDispatchHash: "",
+        lastCIFailureDispatchAt: "",
+      });
+      return;
+    }
+
+    // Only dispatch CI details when in ci_failed state
+    if (newStatus !== "ci_failed") {
+      // CI is no longer failing — clear tracking so next failure is dispatched fresh
+      const lastFingerprint = session.metadata["lastCIFailureFingerprint"] ?? "";
+      if (lastFingerprint) {
+        clearReactionTracker(session.id, ciReactionKey);
+        updateSessionMetadata(session, {
+          lastCIFailureFingerprint: "",
+          lastCIFailureDispatchHash: "",
+          lastCIFailureDispatchAt: "",
+        });
+      }
+      return;
+    }
+
+    // Fetch individual CI checks for failure details.
+    // Use batch enrichment data when available to avoid an extra REST call;
+    // fall back to getCIChecks() when the batch didn't run this cycle.
+    const prKey = `${session.pr.owner}/${session.pr.repo}#${session.pr.number}`;
+    const cachedEnrichment = prEnrichmentCache.get(prKey);
+
+    let checks: CICheck[];
+    if (cachedEnrichment?.ciChecks !== undefined) {
+      checks = cachedEnrichment.ciChecks;
+    } else {
+      try {
+        checks = await scm.getCIChecks(session.pr);
+      } catch {
+        // Failed to fetch checks — skip this cycle
+        return;
+      }
+    }
+
+    const failedChecks = checks.filter(
+      (c) => c.status === "failed" || c.conclusion?.toUpperCase() === "FAILURE",
+    );
+    if (failedChecks.length === 0) return;
+
+    const ciFingerprint = makeFingerprint(
+      failedChecks.map((c) => `${c.name}:${c.status}:${c.conclusion ?? ""}`),
+    );
+    const lastCIFingerprint = session.metadata["lastCIFailureFingerprint"] ?? "";
+    const lastCIDispatchHash = session.metadata["lastCIFailureDispatchHash"] ?? "";
+
+    // Reset reaction tracker when failure set changes
+    if (ciFingerprint !== lastCIFingerprint && transitionReaction?.key !== ciReactionKey) {
+      clearReactionTracker(session.id, ciReactionKey);
+    }
+    if (ciFingerprint !== lastCIFingerprint) {
+      updateSessionMetadata(session, {
+        lastCIFailureFingerprint: ciFingerprint,
+      });
+    }
+
+    // If the transition reaction already sent a ci-failed reaction (now enriched
+    // with detailed check info from the batch cache), record the dispatch hash so
+    // subsequent polls don't re-send the same failure details.
+    if (
+      transitionReaction?.key === ciReactionKey &&
+      transitionReaction.result?.success
+    ) {
+      updateSessionMetadata(session, {
+        lastCIFailureDispatchHash: ciFingerprint,
+        lastCIFailureDispatchAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    // Skip if we already dispatched this exact failure set
+    if (ciFingerprint === lastCIDispatchHash) return;
+
+    // Dispatch CI failure details directly via sessionManager.send() rather than
+    // executeReaction() to avoid consuming the ci-failed reaction's retry budget.
+    // The transition reaction owns escalation; this is a follow-up info delivery.
+    const reactionConfig = getReactionConfigForSession(session, ciReactionKey);
+    if (
+      reactionConfig &&
+      reactionConfig.action &&
+      (reactionConfig.auto !== false || reactionConfig.action === "notify")
+    ) {
+      const detailedMessage = formatCIFailureMessage(failedChecks);
+
+      try {
+        if (reactionConfig.action === "send-to-agent") {
+          await sessionManager.send(session.id, detailedMessage);
+        } else {
+          // For "notify" action, send to human notifiers instead
+          const context = buildEventContext(session, prEnrichmentCache);
+          const event = createEvent("ci.failing", {
+            sessionId: session.id,
+            projectId: session.projectId,
+            message: detailedMessage,
+            data: { failedChecks: failedChecks.map((c) => c.name), context, schemaVersion: 2 },
+          });
+          await notifyHuman(event, reactionConfig.priority ?? "warning");
+        }
+
+        updateSessionMetadata(session, {
+          lastCIFailureDispatchHash: ciFingerprint,
+          lastCIFailureDispatchAt: new Date().toISOString(),
+        });
+      } catch {
+        // Send failed — will retry on next poll cycle
+      }
+    }
   }
 
   /**
@@ -1656,35 +1874,39 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         (reactionConfig.auto !== false || reactionConfig.action === "notify")
       ) {
         try {
-          if (reactionConfig.action === "send-to-agent") {
+          // Build enriched config with dynamic base branch message.
+          // Preserve "warning" priority from old direct-dispatch code unless
+          // the user explicitly set a different priority in their config.
+          const enrichedConfig = {
+            ...reactionConfig,
+            priority: reactionConfig.priority ?? ("warning" as const),
+          };
+          if (reactionConfig.action === "send-to-agent" && !reactionConfig.message) {
             const baseBranch = session.pr.baseBranch ?? "the default branch";
             const behindNote = cachedData.isBehind ? ` is behind ${baseBranch} and` : "";
-            const message =
-              reactionConfig.message ??
-              `Your PR branch${behindNote} has merge conflicts with ${baseBranch}. Rebase your branch on ${baseBranch}, resolve the conflicts, and push. You should not need to call gh for merge status unless you need additional context — this information is current.`;
-            await sessionManager.send(session.id, message);
-          } else {
-            const event = createEvent("merge.conflicts", {
-              sessionId: session.id,
-              projectId: session.projectId,
-              message: `${session.id}: PR has merge conflicts`,
-            });
-            await notifyHuman(event, reactionConfig.priority ?? "warning");
+            enrichedConfig.message = `Your PR branch${behindNote} has merge conflicts with ${baseBranch}. Rebase your branch on ${baseBranch}, resolve the conflicts, and push. You should not need to call gh for merge status unless you need additional context — this information is current.`;
           }
 
-          updateSessionMetadata(session, {
-            lastMergeConflictDispatched: "true",
-          });
+          const result = await executeReaction(session, conflictReactionKey, enrichedConfig);
+          // Only set dedup flag for non-escalated success — escalation hands off
+          // to the human, so we must NOT suppress future agent dispatches if the
+          // condition recurs after the tracker resets.
+          if (result.success && result.action !== "escalated") {
+            updateSessionMetadata(session, {
+              lastMergeConflictDispatched: "true",
+            });
+          }
         } catch {
-          // Send failed — will retry on next poll cycle
+          // Dispatch failed — will retry on next poll cycle
         }
       }
     } else if (lastDispatched === "true") {
-      // Conflicts resolved — clear so we can re-dispatch if they recur
-      clearReactionTracker(session.id, conflictReactionKey);
+      // Conflicts resolved — clear dedup flag and reaction tracker so future
+      // conflicts start a fresh incident with a fresh escalation budget.
       updateSessionMetadata(session, {
         lastMergeConflictDispatched: "",
       });
+      clearReactionTracker(session.id, conflictReactionKey);
     }
   }
 
@@ -1849,6 +2071,28 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
       updateSessionMetadata(session, metadataUpdates);
     }
 
+    // CI resolution tracking — reset the ci-failed tracker (including its escalated
+    // flag) once CI has been passing for CI_PASSING_STABLE_THRESHOLD consecutive polls.
+    // This lets the next real CI failure start with a fresh budget.
+    if (session.pr) {
+      const prKey = `${session.pr.owner}/${session.pr.repo}#${session.pr.number}`;
+      const cachedData = prEnrichmentCache.get(prKey);
+      if (cachedData) {
+        if (cachedData.ciStatus === "passing") {
+          const stableCount = Number(session.metadata["ciPassingStableCount"] ?? "0") + 1;
+          if (stableCount >= CI_PASSING_STABLE_THRESHOLD) {
+            clearReactionTracker(session.id, "ci-failed");
+            updateSessionMetadata(session, { ciPassingStableCount: "" });
+          } else {
+            updateSessionMetadata(session, { ciPassingStableCount: String(stableCount) });
+          }
+        } else if (session.metadata["ciPassingStableCount"]) {
+          // pending or failing resets the stability window — only "passing" counts as resolution
+          updateSessionMetadata(session, { ciPassingStableCount: "" });
+        }
+      }
+    }
+
     if (newStatus !== oldStatus) {
       const correlationId = createCorrelationId("lifecycle-transition");
       // State transition detected
@@ -1879,11 +2123,14 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         allCompleteEmitted = false;
       }
 
-      // Clear reaction trackers for the old status so retries reset on state changes
+      // Clear reaction trackers for the old status so retries reset on state changes.
+      // Persistent keys (ci-failed) are excluded — their trackers survive oscillation
+      // so the escalation budget accumulates across cycles. On escalation, the tracker
+      // is cleared in executeReaction so future incidents get a fresh budget.
       const oldEventType = statusToEventType(undefined, oldStatus);
       if (oldEventType) {
         const oldReactionKey = eventToReactionKey(oldEventType);
-        if (oldReactionKey) {
+        if (oldReactionKey && !PERSISTENT_REACTION_KEYS.has(oldReactionKey)) {
           clearReactionTracker(session.id, oldReactionKey);
         }
       }
@@ -1915,12 +2162,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           if (reactionConfig && reactionConfig.action) {
             // auto: false skips automated agent actions but still allows notifications
             if (reactionConfig.auto !== false || reactionConfig.action === "notify") {
-              const reactionResult = await executeReaction(
-                session.id,
-                session.projectId,
-                reactionKey,
-                reactionConfig,
-              );
+              const reactionResult = await executeReaction(session, reactionKey, reactionConfig);
               transitionReaction = { key: reactionKey, result: reactionResult };
               observer.recordOperation({
                 metric: "lifecycle_poll",
@@ -1956,11 +2198,12 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         // so the config controls which notifiers receive each priority level.
         if (!reactionHandledNotify) {
           const priority = inferPriority(eventType);
+          const context = buildEventContext(session, prEnrichmentCache);
           const event = createEvent(eventType, {
             sessionId: session.id,
             projectId: session.projectId,
             message: `${session.id}: ${oldStatus} → ${newStatus}`,
-            data: { oldStatus, newStatus },
+            data: { oldStatus, newStatus, context, schemaVersion: 2 },
           });
           await notifyHuman(event, priority);
         }
@@ -2001,13 +2244,14 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
         const reactionConfig = getReactionConfigForSession(session, reactionKey);
         if (reactionConfig && reactionConfig.action) {
           if (reactionConfig.auto !== false || reactionConfig.action === "notify") {
-            await executeReaction(session.id, session.projectId, reactionKey, reactionConfig);
+            await executeReaction(session, reactionKey, reactionConfig);
             reactionHandledNotify = true;
           }
         }
       }
 
       if (!reactionHandledNotify) {
+        const context = buildEventContext(session, prEnrichmentCache);
         const prEvent = createEvent(prEventType, {
           sessionId: session.id,
           projectId: session.projectId,
@@ -2015,8 +2259,11 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           data: {
             oldPRState: previousPRState,
             newPRState: session.lifecycle.pr.state,
+            // prNumber/prUrl kept for backward compat — drop in schemaVersion 3
             prNumber: session.lifecycle.pr.number,
             prUrl: session.lifecycle.pr.url,
+            context,
+            schemaVersion: 2,
           },
         });
         await notifyHuman(prEvent, inferPriority(prEventType));
@@ -2042,6 +2289,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
     await Promise.allSettled([
       maybeDispatchReviewBacklog(session, oldStatus, newStatus, transitionReaction),
       maybeDispatchMergeConflicts(session, newStatus),
+      maybeDispatchCIFailureDetails(session, oldStatus, newStatus, transitionReaction),
     ]);
 
     // Report watcher: audit agent reports for issues (#140)
@@ -2118,7 +2366,7 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
 
     // Execute reaction if configured
     if (isNewTrigger && reactionConfig && reactionConfig.auto !== false) {
-      await executeReaction(session.id, session.projectId, reactionKey, reactionConfig);
+      await executeReaction(session, reactionKey, reactionConfig);
     }
   }
 
@@ -2188,7 +2436,17 @@ export function createLifecycleManager(deps: LifecycleManagerDeps): LifecycleMan
           const reactionConfig = config.reactions[reactionKey];
           if (reactionConfig && reactionConfig.action) {
             if (reactionConfig.auto !== false || reactionConfig.action === "notify") {
-              await executeReaction("system", "all", reactionKey, reactionConfig as ReactionConfig);
+              // Create a minimal session context for system events (no PR/issue context)
+              const systemSession: ReactionSessionContext = {
+                id: "system" as SessionId,
+                projectId: "all",
+                pr: null,
+                issueId: null,
+                branch: null,
+                metadata: {},
+                agentInfo: null,
+              };
+              await executeReaction(systemSession, reactionKey, reactionConfig as ReactionConfig);
             }
           }
         }
