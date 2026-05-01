@@ -75,7 +75,7 @@ describe("list", () => {
       branch: "main",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-legacy-bare")),
+      runtimeHandle: makeHandle("rt-legacy-bare"),
     });
 
     const sm = createSessionManager({ config, registry: mockRegistry });
@@ -97,11 +97,11 @@ describe("list", () => {
       status: "merged",
       project: "my-app",
       pr: "https://github.com/org/my-app/pull/42",
-      runtimeHandle: JSON.stringify(makeHandle("rt-orch")),
+      runtimeHandle: makeHandle("rt-orch"),
     });
 
     const oldTime = new Date("2026-01-01T00:00:00.000Z");
-    utimesSync(join(sessionsDir, "app-orchestrator"), oldTime, oldTime);
+    utimesSync(join(sessionsDir, "app-orchestrator.json"), oldTime, oldTime);
 
     const sm = createSessionManager({ config, registry: mockRegistry });
     const sessions = await sm.list("my-app");
@@ -112,7 +112,7 @@ describe("list", () => {
 
     const repaired = readMetadataRaw(sessionsDir, "app-orchestrator");
     expect(repaired!["pr"]).toBeUndefined();
-    expect(repaired!["prAutoDetect"]).toBe("off");
+    expect(repaired!["prAutoDetect"]).toBe("false");
     expect(repaired!["status"]).toBe("working");
   });
 
@@ -126,7 +126,7 @@ describe("list", () => {
     });
 
     const oldTime = new Date("2026-01-02T00:00:00.000Z");
-    utimesSync(join(sessionsDir, "app-legacy"), oldTime, oldTime);
+    utimesSync(join(sessionsDir, "app-legacy.json"), oldTime, oldTime);
 
     const sm = createSessionManager({ config, registry: mockRegistry });
     const sessions = await sm.list("my-app");
@@ -136,10 +136,9 @@ describe("list", () => {
     expect(legacy!.lastActivityAt.getTime()).toBe(oldTime.getTime());
 
     const repaired = readMetadataRaw(sessionsDir, "app-legacy");
-    expect(repaired?.["stateVersion"]).toBe("2");
-    expect(repaired?.["statePayload"]).toBeTruthy();
+    expect(repaired?.["lifecycle"]).toBeTruthy();
 
-    const payload = JSON.parse(repaired!["statePayload"]);
+    const payload = JSON.parse(repaired!["lifecycle"]);
     expect(payload.session.startedAt).toBe("2025-01-01T00:00:00.000Z");
     expect(payload.session.lastTransitionAt).toBe("2025-01-01T00:00:00.000Z");
   });
@@ -185,7 +184,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: mockRegistry });
@@ -217,7 +216,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: registryWithDead });
@@ -246,7 +245,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({
@@ -363,7 +362,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: registryWithError });
@@ -393,7 +392,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: registryWithNull });
@@ -424,7 +423,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: registryWithStaleSignal });
@@ -454,7 +453,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: registryWithTimestamp });
@@ -485,7 +484,7 @@ describe("list", () => {
       branch: "a",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: registryWithOldTimestamp });
@@ -536,7 +535,7 @@ describe("get", () => {
       branch: "main",
       status: "working",
       project: "my-app",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({
@@ -590,7 +589,7 @@ describe("get", () => {
       status: "working",
       project: "my-app",
       agent: "opencode",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
 
     const sm = createSessionManager({ config, registry: mockRegistry });
@@ -624,7 +623,7 @@ describe("get", () => {
       status: "working",
       project: "my-app",
       agent: "opencode",
-      runtimeHandle: JSON.stringify(makeHandle("rt-1")),
+      runtimeHandle: makeHandle("rt-1"),
     });
     writeMetadata(sessionsDir, "app-2", {
       worktree: "/tmp",
@@ -632,7 +631,7 @@ describe("get", () => {
       status: "working",
       project: "my-app",
       agent: "opencode",
-      runtimeHandle: JSON.stringify(makeHandle("rt-2")),
+      runtimeHandle: makeHandle("rt-2"),
     });
 
     const sm = createSessionManager({ config, registry: mockRegistry });
@@ -656,13 +655,13 @@ describe("get", () => {
       branch: "feat/test",
       status: "working",
       project: "my-app",
-      prAutoDetect: "off",
+      prAutoDetect: false,
     });
 
     const sm = createSessionManager({ config, registry: mockRegistry });
     const session = await sm.get("app-1");
 
     expect(session).not.toBeNull();
-    expect(session!.metadata["prAutoDetect"]).toBe("off");
+    expect(session!.metadata["prAutoDetect"]).toBe("false");
   });
 });

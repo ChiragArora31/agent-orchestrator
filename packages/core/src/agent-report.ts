@@ -29,6 +29,7 @@ import type {
 import { mutateMetadata, readMetadataRaw } from "./metadata.js";
 import { buildLifecycleMetadataPatch, cloneLifecycle, deriveLegacyStatus, parseCanonicalLifecycle } from "./lifecycle-state.js";
 import { parsePrFromUrl } from "./utils/pr.js";
+import { deriveSessionKindFromMetadata } from "./utils/session-kind.js";
 import { assertValidSessionIdComponent } from "./utils/session-id.js";
 import { validateStatus } from "./utils/validation.js";
 
@@ -432,10 +433,11 @@ export function applyAgentReport(
     const current = cloneLifecycle(
       parseCanonicalLifecycle(existing, {
         sessionId,
+        sessionKind: deriveSessionKindFromMetadata(sessionId, existing),
         status: validateStatus(existing["status"]),
       }),
     );
-    previousLegacyStatus = deriveLegacyStatus(current, validateStatus(raw["status"]));
+    previousLegacyStatus = deriveLegacyStatus(current);
     before = buildAuditSnapshot(current, previousLegacyStatus);
     const validation = validateAgentReportTransition(current, input.state);
     if (!validation.ok) {
@@ -485,11 +487,11 @@ export function applyAgentReport(
     if (mapped.sessionState === "working" && current.session.startedAt === null) {
       current.session.startedAt = now;
     }
-    legacyStatus = deriveLegacyStatus(current, previousLegacyStatus);
+    legacyStatus = deriveLegacyStatus(current);
     const next = { ...existing };
     Object.assign(
       next,
-      buildLifecycleMetadataPatch(current, previousLegacyStatus),
+      buildLifecycleMetadataPatch(current),
       {
         [AGENT_REPORT_METADATA_KEYS.STATE]: input.state,
         [AGENT_REPORT_METADATA_KEYS.AT]: now,
@@ -520,6 +522,7 @@ export function applyAgentReport(
 
   const nextLifecycle = parseCanonicalLifecycle(nextMetadata, {
     sessionId,
+    sessionKind: deriveSessionKindFromMetadata(sessionId, nextMetadata),
     status: validateStatus(nextMetadata["status"]),
   });
 
