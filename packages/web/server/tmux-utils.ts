@@ -79,7 +79,8 @@ function findStorageKeysForSession(
     if (!STORAGE_KEY_PATTERN.test(entry)) continue;
     const sessionFile = join(aoBase, entry, "sessions", sessionId);
     if (fs.exists(sessionFile)) {
-      if (projectId && (entry === projectId || entry.endsWith(`-${projectId}`))) {
+      const unwrappedProjectId = entry.slice(13); // Strip "{hash}-" prefix when present.
+      if (projectId && (entry === projectId || unwrappedProjectId === projectId)) {
         projectMatches.push(entry);
       } else {
         matches.push(entry);
