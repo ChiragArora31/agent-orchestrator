@@ -26,9 +26,6 @@ const FILTERS: Array<{ value: "all" | DashboardTimelineCategory; label: string }
 ];
 
 function categoryForActivityEvent(event: DashboardActivityEvent): DashboardTimelineCategory {
-  if (event.level === "error" || event.kind.includes("failed")) {
-    return "error";
-  }
   if (event.source === "runtime" || event.kind.startsWith("runtime.")) return "runtime";
   if (event.source === "reaction" || event.kind.startsWith("reaction.")) return "reaction";
   if (
@@ -55,6 +52,9 @@ function categoryForActivityEvent(event: DashboardActivityEvent): DashboardTimel
     event.kind.startsWith("detecting.")
   ) {
     return "lifecycle";
+  }
+  if (event.level === "error" || event.kind.includes("failed")) {
+    return "error";
   }
   return "other";
 }

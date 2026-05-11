@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionTimeline } from "../SessionTimeline";
 import { makeSession } from "../../__tests__/helpers";
@@ -88,5 +88,50 @@ describe("SessionTimeline", () => {
     });
     expect(screen.getByText("newer snapshot")).toBeInTheDocument();
     expect(screen.queryByText("older snapshot")).not.toBeInTheDocument();
+  });
+
+  it("classifies domain-prefixed failures under their domain filter, not only Errors", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            events: [
+              {
+                id: 1,
+                ts: new Date().toISOString(),
+                tsEpoch: Date.now(),
+                projectId: "proj",
+                sessionId: "domain-fail",
+                source: "runtime",
+                kind: "runtime.probe_failed",
+                level: "warn",
+                summary: "Runtime probe failed",
+                data: null,
+              },
+            ],
+          }),
+        text: () => Promise.resolve(""),
+      } as Response),
+    );
+
+    render(
+      <SessionTimeline
+        session={makeSession({
+          id: "domain-fail",
+          projectId: "proj",
+          agentReportAudit: [],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("Runtime probe failed")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Errors" }));
+    expect(screen.queryByText("Runtime probe failed")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
+    expect(screen.getByText("Runtime probe failed")).toBeInTheDocument();
   });
 });
