@@ -471,7 +471,7 @@ function ProjectSidebarInner({
                     key={session.id}
                     href={sessionHref}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey) return;
                       e.preventDefault();
                       navigate(sessionHref, session);
                     }}
@@ -564,7 +564,7 @@ function ProjectSidebarInner({
                   <a
                     href={projectHref}
                     onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey) return;
                       e.preventDefault();
                       navigate(projectHref);
                     }}
@@ -636,7 +636,7 @@ function ProjectSidebarInner({
                     href={projectHref}
                     prefetch={false}
                     onClick={(e) => {
-if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+                      if (e.metaKey || e.ctrlKey || e.shiftKey) return;
                       e.preventDefault();
                       e.stopPropagation();
                       navigate(projectHref);
@@ -851,7 +851,7 @@ if (e.metaKey || e.ctrlKey || e.shiftKey) return;
                           <a
                             href={sessionHref}
                             onClick={(e) => {
-                              if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
+                              if (e.metaKey || e.ctrlKey || e.shiftKey) return;
                               e.preventDefault();
                               navigate(sessionHref, session);
                             }}
