@@ -25,8 +25,23 @@ const FILTERS: Array<{ value: "all" | DashboardTimelineCategory; label: string }
   { value: "other", label: "Other" },
 ];
 
+function isPRTimelineKind(kind: string): boolean {
+  return (
+    kind === "pr" ||
+    kind === "pull_request" ||
+    kind.startsWith("pr.") ||
+    kind.startsWith("pull_request.")
+  );
+}
+
 function categoryForActivityEvent(event: DashboardActivityEvent): DashboardTimelineCategory {
-  if (event.source === "runtime" || event.kind.startsWith("runtime.")) return "runtime";
+  if (
+    event.source === "runtime" ||
+    event.kind.startsWith("runtime.") ||
+    event.kind.startsWith("subprocess.")
+  ) {
+    return "runtime";
+  }
   if (event.source === "reaction" || event.kind.startsWith("reaction.")) return "reaction";
   if (
     event.source === "api" ||
@@ -42,7 +57,7 @@ function categoryForActivityEvent(event: DashboardActivityEvent): DashboardTimel
     event.kind.startsWith("ci.") ||
     event.kind.startsWith("review.") ||
     event.kind.startsWith("scm.") ||
-    event.kind.includes("pr")
+    isPRTimelineKind(event.kind)
   ) {
     return "pr";
   }

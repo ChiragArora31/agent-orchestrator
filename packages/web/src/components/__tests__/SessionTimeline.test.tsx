@@ -134,4 +134,49 @@ describe("SessionTimeline", () => {
     fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
     expect(screen.getByText("Runtime probe failed")).toBeInTheDocument();
   });
+
+  it("does not classify subprocess events as PR events", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            events: [
+              {
+                id: 1,
+                ts: new Date().toISOString(),
+                tsEpoch: Date.now(),
+                projectId: "proj",
+                sessionId: "subprocess-event",
+                source: "agent",
+                kind: "subprocess.spawned",
+                level: "info",
+                summary: "Started subprocess",
+                data: null,
+              },
+            ],
+          }),
+        text: () => Promise.resolve(""),
+      } as Response),
+    );
+
+    render(
+      <SessionTimeline
+        session={makeSession({
+          id: "subprocess-event",
+          projectId: "proj",
+          agentReportAudit: [],
+        })}
+      />,
+    );
+
+    expect(await screen.findByText("Started subprocess")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "PR/CI" }));
+    expect(screen.queryByText("Started subprocess")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
+    expect(screen.getByText("Started subprocess")).toBeInTheDocument();
+  });
 });
