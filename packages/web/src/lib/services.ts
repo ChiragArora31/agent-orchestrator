@@ -39,6 +39,7 @@ import pluginAgentAider from "@aoagents/ao-plugin-agent-aider";
 import pluginAgentClaudeCode from "@aoagents/ao-plugin-agent-claude-code";
 import pluginAgentCodex from "@aoagents/ao-plugin-agent-codex";
 import pluginAgentCursor from "@aoagents/ao-plugin-agent-cursor";
+import pluginAgentKimicode from "@aoagents/ao-plugin-agent-kimicode";
 import pluginAgentOpencode from "@aoagents/ao-plugin-agent-opencode";
 import pluginWorkspaceWorktree from "@aoagents/ao-plugin-workspace-worktree";
 import pluginWorkspaceClone from "@aoagents/ao-plugin-workspace-clone";
@@ -122,6 +123,7 @@ async function initServices(): Promise<Services> {
   registry.register(pluginAgentClaudeCode);
   registry.register(pluginAgentCodex);
   registry.register(pluginAgentCursor);
+  registry.register(pluginAgentKimicode);
   registry.register(pluginAgentOpencode);
   registry.register(pluginWorkspaceWorktree);
   registry.register(pluginWorkspaceClone);
@@ -161,11 +163,7 @@ function loadDashboardConfig(): LoadedConfig {
   } catch (error) {
     // The dashboard prefers the global portfolio config, but users may still
     // launch it from a single repo that only has a local agent-orchestrator.yaml.
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return loadConfig();
     }
     if (error instanceof ConfigNotFoundError) {
