@@ -1177,10 +1177,10 @@ describe("scm-github plugin", () => {
       expect(result.mergeable).toBe(false);
     });
 
-    it("draft PR with MERGEABLE + BLOCKED merge state is not treated as conflicting (#1314)", async () => {
+    it("draft PR with UNKNOWN + BLOCKED merge state is not treated as conflicting (#1314)", async () => {
       mockGh({ state: "OPEN" }); // getPRState
       mockGh({
-        mergeable: "MERGEABLE",
+        mergeable: "UNKNOWN",
         reviewDecision: "APPROVED",
         mergeStateStatus: "BLOCKED",
         isDraft: true,
@@ -1191,6 +1191,7 @@ describe("scm-github plugin", () => {
       expect(result.noConflicts).toBe(true);
       expect(result.mergeable).toBe(false);
       expect(result.blockers).toContain("PR is still a draft");
+      expect(result.blockers).toContain("Merge status unknown (GitHub is computing)");
       expect(result.blockers).toContain("Merge is blocked by branch protection");
     });
 
