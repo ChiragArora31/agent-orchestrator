@@ -28,7 +28,6 @@ import {
   shouldRefreshPREnrichment,
   checkReviewCommentsETag,
   setExecFileAsync,
-  checkReviewCommentsETag,
 } from "../src/graphql-batch.js";
 
 // Mock execFile using the injection function

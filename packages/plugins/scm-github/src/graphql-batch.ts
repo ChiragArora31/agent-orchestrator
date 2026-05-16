@@ -538,6 +538,7 @@ async function checkPRListETag(
     // that don't populate stdout on non-zero exit). Use is304() anchored to the HTTP status
     // line to avoid false positives from URL paths like "pulls/304/comments".
     if (is304(errorMsg)) {
+      markETagGuardSuccess("ETag Guard 1", repoKey);
       return false;
     }
     warnETagGuardFailure(
@@ -614,6 +615,7 @@ async function checkCommitStatusETag(
 
     const errorMsg = err instanceof Error ? err.message : String(err);
     if (is304(errorMsg)) {
+      markETagGuardSuccess("ETag Guard 2", commitKey);
       return false;
     }
     warnETagGuardFailure(
@@ -685,6 +687,7 @@ export async function checkReviewCommentsETag(
 
     const errorMsg = err instanceof Error ? err.message : String(err);
     if (is304(errorMsg)) {
+      markETagGuardSuccess("ETag Guard 3", cacheKey);
       return false;
     }
     warnETagGuardFailure(
