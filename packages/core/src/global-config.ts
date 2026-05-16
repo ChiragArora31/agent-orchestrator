@@ -8,7 +8,11 @@ import { atomicWriteFileSync } from "./atomic-write.js";
 import { detectScmPlatform } from "./config-generator.js";
 import { withFileLockSync } from "./file-lock.js";
 import { ProjectResolveError } from "./types.js";
-import { deriveSessionPrefixFromProjectPath, generateSessionPrefix } from "./paths.js";
+import {
+  deriveSessionPrefixFromProjectPath,
+  generateSessionPrefix,
+  sanitizeIdentifierComponent,
+} from "./paths.js";
 import { normalizeOriginUrl } from "./storage-key.js";
 import { getDefaultRuntime } from "./platform.js";
 
@@ -635,7 +639,9 @@ function normalizeLegacyRepoValue(
 }
 
 function getRegisteredSessionPrefix(entry: GlobalProjectEntry, projectId: string): string {
-  if (entry.sessionPrefix) return entry.sessionPrefix;
+  if (entry.sessionPrefix && sanitizeIdentifierComponent(entry.sessionPrefix) === entry.sessionPrefix) {
+    return entry.sessionPrefix;
+  }
   if (entry.path?.trim()) {
     return deriveSessionPrefixFromProjectPath(resolve(entry.path.trim()));
   }
@@ -754,10 +760,9 @@ export function registerProjectInGlobalConfig(
       ?? normalizeRepoIdentity(originUrl)
       ?? (localConfig?.repo ? normalizeLegacyRepoValue(localConfig.repo) : undefined);
     const defaultBranch = existing?.defaultBranch ?? localConfig?.defaultBranch ?? "main";
-    const requestedSessionPrefix =
-      existing?.sessionPrefix ??
-      localConfig?.sessionPrefix ??
-      deriveSessionPrefixFromProjectPath(requestedProjectPath);
+    const requestedSessionPrefix = existing
+      ? getRegisteredSessionPrefix(existing, effectiveProjectId)
+      : localConfig?.sessionPrefix ?? deriveSessionPrefixFromProjectPath(requestedProjectPath);
     const source = existing?.source ?? (repoIdentity ? "ao-project-add" : "local");
     const registeredAt = existing?.registeredAt ?? Math.floor(Date.now() / 1000);
     const explicitSessionPrefix = !existing?.sessionPrefix && Boolean(localConfig?.sessionPrefix);
@@ -849,10 +854,7 @@ export function resolveProjectIdentity(
 
   const projectPath = entry.path;
   const name = (entry.displayName as string | undefined) ?? projectId;
-  const sessionPrefix =
-    typeof entry.sessionPrefix === "string" && entry.sessionPrefix.length > 0
-      ? entry.sessionPrefix
-      : deriveSessionPrefixFromProjectPath(resolve(projectPath));
+  const sessionPrefix = getRegisteredSessionPrefix(entry, projectId);
   const defaultBranch =
     typeof entry.defaultBranch === "string" && entry.defaultBranch.length > 0
       ? entry.defaultBranch
